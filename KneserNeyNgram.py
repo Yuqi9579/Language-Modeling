@@ -1,51 +1,21 @@
 import math
-from collections import defaultdict, Counter
-
-def preprocessing(file,model_order):
-    '''
-    Getting the clean text
-    :param file:
-    :param model_order: N_gram
-    :return: list->list->str
-    '''
-    sentences = []
-    with open(file) as f:
-        for line in f.readlines():
-            line = line.strip('\n')
-            line = line.lower()
-            line = line.split(' ')
-            BOS = (model_order-1) * ['<s>']
-            EOS = ['</s>']
-            line = BOS + line + EOS
-            sentences.append(line)
-    return sentences
-
-def get_ngram_list(sentences,n):
-    '''
-    To get every ngram as a tuple
-    :param sentences: preprocessed text
-    :param n: model order
-    :return: list->tuple->str
-    '''
-    ngram_list = []
-    for sentence in sentences:
-        for i in range(len(sentence)-n+1):
-            ngram_list.append(tuple(sentence[i:i+n]))
-    return ngram_list
-
+from collections import Counter
+from Preprocessing import NgramTextNomalizer
 
 class NgramModel:
     def __init__(self,n,ngram_list):
+        self.unk = ['<unk>']
         self.bos = ['<s>']
         self.eos = ['</s>']
         self.model_order = n
-        self.lm = self.train(ngram_list)
+        self.lm, self.unk_prob = self.train(ngram_list)
 
     def train(self,ngram_list):
         ngram_count = Counter(ngram_list) #dict{tuple->str: int}
         kgram_count_list = self._count_adj_kgram(ngram_count)
         probs = self._cal_prob(kgram_count_list)
-        return probs
+        unk_prob = probs[4][('<unk>',)]
+        return probs, unk_prob
 
     def _count_adj_kgram(self,ngram_count):
         '''
@@ -105,16 +75,16 @@ class NgramModel:
             order_adj_prob[kgram] = order_adj_prob.get(kgram, 0) - D
         for kgram in order_adj_prob.keys():
             prefix = kgram[: -1]
-            order_adj_prob[kgram] = math.log(order_adj_prob[kgram]/prefix_sum[prefix])
+            order_adj_prob[kgram] = order_adj_prob[kgram]/prefix_sum[prefix]
         for prefix in bow.keys():
-            bow[prefix] = math.log(bow[prefix]/prefix_sum[prefix])
+            bow[prefix] = bow[prefix]/prefix_sum[prefix]
         return bow, order_adj_prob
 
     def _cal_unigram_prob(self, unigram_count):
         unigram_prob = {}
         prefix_sum = sum(count for count in unigram_count.values())
         for key in unigram_count.keys():
-            unigram_prob[key] = math.log(unigram_count[key]/prefix_sum)
+            unigram_prob[key] = unigram_count[key]/prefix_sum
         #unigram_prob = dict((k,math.log(v/prefix_sum)) for k,v in unigram_count.items())
         return unigram_prob
 
@@ -134,7 +104,7 @@ class NgramModel:
             for kgram in order.keys():
                 prefix = kgram[:-1]
                 suffix = kgram[1:]
-                order[kgram] = order.get(kgram, 0) + (last_order[suffix] + bow[prefix])
+                order[kgram] = order.get(kgram, 0) + (last_order[suffix] * bow[prefix])
             last_order = order
             probs.append(order)
         probs.reverse()
@@ -144,8 +114,8 @@ class NgramModel:
     def logprob(self, ngram):
         for i, order in enumerate(self.lm):
             if ngram[i:] in order:
-                return order[ngram[i:]]
-        return None
+                return math.log(order[ngram[i:]])
+        return self.unk_prob
 
     def sentence_prob(self, sentence):
         '''
@@ -157,18 +127,23 @@ class NgramModel:
         for i in range(len(adj_sentence)-self.model_order+1):
             ngram = adj_sentence[i:i+self.model_order]
             sent_logprob += self.logprob(ngram)
-        return math.exp(sent_logprob)
+        return sent_logprob
 
-    def perplexity(self, sentences):
+    def perplexity(self, sentences, size):
+        pp = 0
         for sentence in sentences:
-
-
+            pp += self.sentence_prob(sentence)
+        pp = -(1/size) * pp
+        return math.exp(pp)
 
 if __name__ == '__main__':
-    training = 'Europal-v9'
+    ntn = NgramTextNomalizer('Europal-v9')
+    train = 'wsj.text.train'
     test = 'wsj.text.test'
-    training_text = preprocessing(training, 5)
-    test_text = preprocessing(test, 5)
-    ngram_list = get_ngram_list(training_text, 5)
-    lm = NgramModel(5, ngram_list)
-    print(lm.sentence_prob(['i','have','a','dream','.']))
+    training_text = ntn.sentence_separation(train, 5, replacement=True, add_symbol=True)
+    test_text = ntn.sentence_separation(test, 5, replacement=True, add_symbol=False)
+    training_ngram_list, training_size = ntn.get_ngram_list(training_text, 5)
+    test_ngram_list, test_size = ntn.get_ngram_list(test_text, 5)
+    lm = NgramModel(5, training_ngram_list)
+    #print(lm.sentence_prob(['today','is','a','good','day','.']))
+    print(lm.perplexity(test_text, test_size))
