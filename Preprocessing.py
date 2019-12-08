@@ -6,7 +6,6 @@ class NgramTextNomalizer():
         self.sent_start = '<s>'
         self.sent_end = '</s>'
         self.lexicon = self._get_fixed_lexicon(lexicon_file)
-        print(self.lexicon.index('<s>'))
 
     def _get_fixed_lexicon(self, lexicon_file):
         sentences = self.sentence_separation(lexicon_file, 1, replacement=False, add_symbol=True)
